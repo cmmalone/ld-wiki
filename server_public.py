@@ -13,6 +13,7 @@ import asyncio
 import os
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import anthropic
 import mcp.server.stdio
@@ -23,6 +24,12 @@ from mcp.server import Server
 load_dotenv(Path(__file__).parent / ".env")
 
 WIKI_DIR = Path(__file__).parent / "wiki"
+
+_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+if not _api_key:
+    raise RuntimeError(
+        "ANTHROPIC_API_KEY is not set — copy .env.example to .env and add your key."
+    )
 
 # Synced from linear-digressions-agent/agent/tools/wiki.py — update both if prompts change
 QUERY_SYSTEM = textwrap.dedent("""\
@@ -74,9 +81,12 @@ async def list_tools() -> list[types.Tool]:
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
     if name == "query_wiki":
-        return await _query_wiki(arguments["question"])
+        question = arguments.get("question", "")
+        if not question:
+            return [types.TextContent(type="text", text="No question provided.")]
+        return await _query_wiki(question)
     return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
 
 
@@ -106,14 +116,7 @@ async def _query_wiki(question: str) -> list[types.TextContent]:
         )]
 
     wiki_content = "\n\n---\n\n".join(pages)
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return [types.TextContent(
-            type="text",
-            text="ANTHROPIC_API_KEY is not set. Add it to the .env file next to server_public.py.",
-        )]
-
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=_api_key)
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=2048,
